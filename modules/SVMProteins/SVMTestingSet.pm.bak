@@ -1,0 +1,246 @@
+package SVMTestingSet;
+use base 'SVMProteins';
+use strict;
+use warnings;
+use Algorithm::SVM;
+use Bio::SeqIO;
+use Bio::SearchIO; 
+use Data::Dumper;
+use IO::File;
+
+
+
+
+
+##################################################
+# new
+#
+# DESCRIPTION:  this method is called whenever a new
+#               SVMTestingSet object is created.
+#               It will accept any %args passed.
+#
+# IN
+#       %arguments  : parameters set in the .pl program
+#
+# OUT
+#       $self       : will return the $self blessed with 
+#                   the class
+##################################################
+sub new {
+    my $class = shift;
+    my %arguments = @_;
+    
+    my $self = {
+        pos_location => "pos_infile",
+        neg_location => "neg_infile",
+        outfile      => "outfile",
+        descriptor   => "dip",
+        optimize     => 0,
+        gamma        => 8,
+        tradeoff     => 8,
+        %arguments,
+    };
+    # bless this with the class
+    bless($self, $class);
+    return $self;
+}
+
+##################################################
+# test
+#
+# DESCRIPTION:  this method will use all the arguments
+#               provided in the constructor and will test
+#               the genomes of interest.  a hash will be returned
+#               with the sequences >0 SVM value
+#
+# IN
+#       nothing is needed as the input
+#
+# OUT
+#       $svm_hash   : hash of hashes that is returned
+#           KEY         VALUE
+#           id          id of protein
+#           svm_score   score predicted from the svm
+#           seq         sequence of protein of interest
+#           length      length of sequence of interest
+##################################################
+sub test {
+    my $self        = shift;
+    my $trained_svm = shift;
+    print "Should be the trained svm: $trained_svm\n\n";
+    my $descriptor  = $self->{descriptor};
+    my $genome      = $self->{genome};
+    my %results     = ();
+        
+    # create a new BioSeqIO object with the genome location
+    my $genome_obj = Bio::SeqIO->new(   -file   => "$genome",
+                                        -format => "fasta");
+                                        
+    # this will loop through all the sequences in the genome                             
+    while(my $in = $genome_obj->next_seq){
+        my $description = $descriptor->($in->seq);
+        my $refer       = SVMProteins::attribute_ref($description);
+        my $test        = Algorithm::SVM::DataSet->new(Label    => 0,
+                                                       Data     => $refer);
+        my $res         = $trained_svm->predict_value($test);
+        if($res > 0){
+            my %temp_hash           = ();         
+            $temp_hash{id}          = $in->id;
+            $temp_hash{svm_score}   = $res;
+            $temp_hash{seq}         = $in->seq;
+            $temp_hash{length}      = $in->length;
+            $results{$in->id}       = \%temp_hash;
+            
+        }
+    }
+    return \%results;
+}
+
+##################################################
+# analysis
+#
+# DESCRIPTION:  This method will perform analysis on sequences of interest (soi).
+#               It will take each soi, perform a multiple
+#               sequence alignment (MSA) and subsequent phylogenetic analysis.
+#               It will output the phylogenies that contain each soi
+#               grouped with the positive data.
+#               
+#
+# IN
+#       $soi       : this is a reference to a hash
+#                   that contains all the sequences of interest
+#
+# OUT
+#       nothing is returned, phylogenies are put into a separate folder
+#       
+##################################################
+sub analysis{
+    my $self    = shift;
+    my $soi     = shift;
+    my $pos     = $self->{pos_location};
+    
+    
+    # open the temp_blast file, generated in rBLAST
+    my $seqio_obj   = Bio::SeqIO->new(  -file   => "./temp_dir/temp_blast",
+                                        -format => "fasta");
+                                        
+    my $i = 1;
+    # while there are still sequences in the temp_blast file
+    while(my $in = $seqio_obj->next_seq){
+        `cp $pos ./temp_dir/$i.fa`;
+        # open the copied file you just created
+        open(my $FH, '>>', "./temp_dir/$i.fa") or die "The temp file in the analysis method could not be opened/appened to.";
+        # add the sequence from the temp_blast file into our positive data
+        print $FH "\nQUERYnum$i" . "\n" . $in->seq;
+        # run clustalw on this new file
+        `clustalw -INFILE=./temp_dir/$i.fa -OUTFILE=./temp_dir/$i.phy -OUTPUT=Phylip`;
+        # run PhyML on the new outfile
+        `phyml ./temp_dir/$i.phy 1 i 1 100 JTT e 4 e BIONJ n n`;
+        $i++;
+    }
+    
+    
+}
+
+###TODO:  IDK if this method is needed, could be best
+# just to print out a summary of the blast results
+# and point to where the MSA/phyml files are.
+##################################################
+# filter
+#
+# DESCRIPTION:  This method will take in the hash from the
+#               rBLAST method, get the keywords and make a new
+#               hash called sequences of interest (soi).
+#               
+#
+# IN
+#       $results    : this is a reference to a hash generated
+#                   in the rBLAST and test methods
+#
+# OUT
+#       $soi        : this is the returned hash with all our seqs
+##################################################
+sub filter{
+
+}
+
+##################################################
+# rBLAST
+#
+# DESCRIPTION:  This is a reciprocal BLAST method.
+#               It will use the hash generated in 
+#               the test method and BLAST each seq.
+#               It will then extract relevant information
+#               and add it to the results hash.
+#               
+#
+# IN
+#       $results    : this is a reference to a hash
+#                   please see test description for a 
+#                   more thorough description
+#
+# OUT
+#       $results    : the reference to the hash is returned
+#                   it's not neccesary because we will be
+#                   changing the hash directly.
+##################################################
+sub rBLAST {
+    my $self    = shift;
+	my $results = shift;
+	
+	print "here is the returned hash inside rBlast:>>>>\n\n";
+    print Dumper($results);
+    
+    `mkdir temp_dir`;
+    
+    # open the temp file we will blast with
+    open(my $TEMP, '>', "./temp_dir/temp_blast") or die "The temp BLAST file could not be created";
+    
+    my @ids     = keys %$results;
+    my $i = 0;
+    # for each of the ids, how many of them are >100 AA?
+    foreach my $id (@ids){
+        if($results->{$id}->{length} > 100){
+            $i++;
+        }
+        print $TEMP ">" . $id;
+        print $TEMP "\n" . $results->{$id}->{seq} . "\n";
+    }
+    
+
+    ##TODO: Parallel run of blasts
+    # NOTE: all of the sequences needed to be blasted are set up in 
+    # ten separate files.  These individual files are then run concurrently
+    ##BROKEN: need to fix this so I will be able to run against NR database
+    `blast -d /NAS/data/SEQ/BLAST/nr -i temp_blast -p blastp > ./temp_dir/temp_results.bls`;
+    
+    
+    
+    my $in = new Bio::SearchIO(-format  => 'blast', 
+                                -file   => './temp_dir/temp_results.bls');
+    while( my $result = $in->next_result ) {
+    ## $result is a Bio::Search::Result::ResultI compliant object
+        while( my $hit = $result->next_hit ) {
+        ## $hit is a Bio::Search::Hit::HitI compliant object
+            while( my $hsp = $hit->next_hsp ) {
+            ## $hsp is a Bio::Search::HSP::HSPI compliant object
+                if( $hsp->length('total') > 50 ) {
+                    if ( $hsp->percent_identity >= 75 ) {
+                        print   "Query=",   $result->query_name,
+                                " Hit=",        $hit->name,
+                                " Length=",     $hsp->length('total'),
+                                " Percent_id=", $hsp->percent_identity, "\n";
+                    }
+                }
+            }  
+        }
+    }
+    
+	print "There were $i hits over than 100 aa\n\n";
+	
+	return $results;
+
+}
+
+
+1;

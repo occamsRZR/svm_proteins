@@ -1,0 +1,22 @@
+=head2 Thu Dec 16 23:55:53 2010: C<Module> L<Algorithm::SVM|Algorithm::SVM>
+
+=over 4
+
+=item *
+
+C<installed into: /home/bfulk/public_html/gPanda_v0.1/modules/lib/perl5/site_perl/5.8.8>
+
+=item *
+
+C<LINKTYPE: dynamic>
+
+=item *
+
+C<VERSION: 0.13>
+
+=item *
+
+C<EXE_FILES: >
+
+=back
+

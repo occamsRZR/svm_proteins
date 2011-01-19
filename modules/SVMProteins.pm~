@@ -1,0 +1,339 @@
+package SVMProteins;
+BEGIN{
+    unshift @INC, "./modules/SVMProteins";
+}
+use strict;
+use warnings;
+use Bio::SeqIO;
+use Algorithm::SVM;
+use Algorithm::SVM::DataSet;
+use Data::Dumper;
+use SVMProteins::SVMTrainingSet;
+use SVMProteins::SVMTestingSet;
+
+
+
+##################################################
+# new
+#
+# DESCRIPTION:  this method is called whenever a new
+#               SVMProteins object is created.
+#               It will accept any %args passed.
+#
+# IN
+#       %arguments  : parameters set in the .pl program
+#
+# OUT
+#       $self       : will return the $self blessed with 
+#                   the class
+##################################################
+sub new {
+    my $class = shift;
+    my %arguments = @_;
+
+    # When a new job is created, we need to record the time so it may have it's
+    # own temp directory.
+    # The format of the folder will be YYYY-MM-DD-HHMM_SS
+    my $dir = `date +%Y-%m-%d-%H%M_%S`;
+    
+    chomp($dir);
+    
+    # This is a hash that will store a reference to the 
+    # descriptor program requested using -descriptor=
+    my %descriptor_table = ("aa" 	=> \&aa_comp,
+						"dip"	=> \&dipeptide_comp,
+						"trip" 	=> \&tripeptide_comp);
+    # we need to take the passed descriptor argument and make
+    # it a reference to its associated method
+    $arguments{descriptor}  = $descriptor_table{$arguments{descriptor}};
+    
+    # This hash table points to the genome location using 
+    # the supplied three letter code;
+    my %genome_table    = ( "ath"   => "./genomes/ath.fa",
+                            "chl"   => "./genomes/chl.fa");
+
+    # we will change the %arguments with the full location
+    $arguments{genome}      = $genome_table{$arguments{genome}};    
+    
+    my $self = {
+        pos_location => "pos_infile",
+        neg_location => "neg_infile",
+        outfile      => "outfile",
+        descriptor   => "dip",
+        optimize     => 0,
+        gamma        => 8,
+        tradeoff     => 8,
+	dir          => $dir,
+        %arguments,
+    };
+    bless($self, $class);
+    return $self;
+}
+
+
+##################################################
+# start
+#
+# DESCRIPTION: this method takes all the arguments passed to our program and puts them in a hash
+#               so they can be passed along to the SVMTrainingSet and SVMTestingSet objects.
+#               
+#
+# IN
+#       $self  : start is called, $self is passed
+#
+# OUT
+#       nothing is returned
+##################################################
+sub start {
+    my $self = shift;
+    my %args = (pos_location    => $self->{pos_location},
+                neg_location    => $self->{neg_location},
+                outfile         => $self->{outfile},
+                descriptor      => $self->{descriptor},
+                genome          => $self->{genome},
+                optimize        => $self->{optimize},
+                gamma           => $self->{gamma},
+                tradeoff        => $self->{tradeoff},
+                dir             => $self->{dir}
+		);
+    
+    
+    
+    # make a training set
+    my $svm_train    = SVMTrainingSet->new(%args);
+    my $trained_set  = $svm_train->train();
+    
+    # make a testing set
+    my $testing_set  = SVMTestingSet->new(%args);
+    # get the results from the genome (>0 svm score)
+    my $results = $testing_set->test($trained_set);
+    # reciprocally BLAST all the results
+#    $results    = $testing_set->rBLAST($results);
+    # we then need to parse these BLAST reports
+#    $results    = $testing_set->parseBLAST($results);
+    # we can then do MSA and phylogenetic analysis
+#    $results    = $testing_set->analysis($results);
+    # a summary of the results is printed
+    $testing_set->printResults($results);
+    
+    print "\nThe current job should be finished.  It may take a while for all the multiple sequence alignments and phylogenetic analysis to be complete.  Use \'qstat\' to check if there are any msa_phy jobs still in the queue.\n";
+    
+    return 1; 
+}
+
+
+
+##################################################
+# aa_comp
+#
+# DESCRIPTION: takes in a sequence and finds the 
+#  				composition of amino acids
+#	
+# IN	
+#       $seq_in	    	: string of sequence
+#
+# OUT   
+#       $comp_string  	: string containing the composition
+#						of amino acids in this protein
+##################################################
+sub aa_comp{
+	#takes the sequence from the SeqIO obj
+	my $seqin = shift;
+	my @BASES = ("K","N","T","R","S","I","M","H","P","L","E","D","A","G","V","Q","Y","C","W","F");
+	
+	#composition hash, indexed by base
+	my %composition;
+	my $total;
+	#Initializes it to zero (might not be neccessary).
+	foreach my $b ( @BASES ) {
+	    $composition{$b} = 0;
+	}
+	#Finds the total number of Amino acids in the sequence.
+	foreach my $base ( split(//,$seqin) ) {
+		$composition{uc $base}++;
+		$total++;
+	}
+
+	my $ct = 0;
+	foreach my $base ( @BASES ) {
+	    $ct += $composition{$base};
+	}
+	my $i = 1;
+	my $comp_string = "";
+	foreach my $base ( @BASES ){
+		my $ratio = $composition{$base} / $ct;
+		$comp_string .= "$i" . ":" . "$ratio ";
+		$i++;
+	}
+	$comp_string .= "\n";
+	return $comp_string;
+}
+
+##################################################
+# dipeptide_comp
+#
+# DESCRIPTION: takes in a sequence and finds the 
+#  				composition of dipeptide bonds
+#	
+# IN	
+#       $seq_in	    : string of sequence
+#
+# OUT   
+#       $comp_string  	: string containing the composition
+#						of dipeptide bonds in this protein
+##################################################
+sub dipeptide_comp{
+	#takes the sequence from the SeqIO obj
+	my $seqin = shift;
+		
+	chomp $seqin;
+	my @BASES = ("K","N","T","R","S","I","M","H","P","L","E","D","A","G","V","Q","Y","C","W","F");
+	
+	# Takes the BASES array and makes a new array with all possible dipeptide combinations
+	my @diBASE;
+	foreach my $base1 ( @BASES ){
+		foreach my $base2 ( @BASES ){
+			push @diBASE, "$base1$base2";
+		}
+	}
+	
+	# Composition hash, indexed by dipeptide. Total dipeptides.
+	my %composition;
+	my $total = 0;
+	#Initializes it to zero (might not be neccessary).
+	foreach my $diB ( @diBASE ) {
+	    $composition{$diB} = 0;
+	}
+	
+	my @seq_array = split(//,$seqin);
+	# Use shift to take the first amino acid
+	my $dp = shift @seq_array;
+	##TODO take another look at this to make sure we are getting the right figures
+	# Uses a while loop to extract subseq of the incoming sequence.
+	foreach my $base(@seq_array){
+		$dp .= $base;
+		$composition{uc $dp}++;
+		$total++;
+		# Takes the first AA in base and "pops" it off.
+		$dp = substr($dp, 1);
+	}
+	
+	my $i = 1;
+	my $comp_string = "";
+	# if this protein has at least 1 dipeptide bonds, find the ratio
+	if($total){
+		foreach my $diB ( @diBASE ){
+			my $ratio = $composition{$diB} / $total;
+			$comp_string .= "$i" . ":" . "$ratio ";
+			$i++;
+		}
+		$i++;
+		$comp_string .= "\n";
+	}
+	# else, print an error message
+	else{
+		print "This protein has no dipeptide bonds!\n\n";
+	}
+	
+	return $comp_string;
+}
+
+##################################################
+# tripeptide_comp
+#
+# DESCRIPTION: takes in a sequence and finds the 
+#  				composition of dipeptide bonds
+#	
+# IN	
+#       $seq_in	    : string of sequence
+#
+# OUT   
+#       $comp_string  	: string containing the composition
+#						of dipeptide bonds in this protein
+##################################################
+sub tripeptide_comp{
+	#takes the sequence from the SeqIO obj
+	my $seqin = shift;
+	chomp $seqin;
+	my @BASES = ("K","N","T","R","S","I","M","H","P","L","E","D","A","G","V","Q","Y","C","W","F");
+	
+	# Takes the BASES array and makes a new array with all possible dipeptide combinations
+	my @triBASE;
+	foreach my $base1 ( @BASES ){
+		foreach my $base2 ( @BASES ){
+            foreach my $base3 ( @BASES ){
+    			push @triBASE, "$base1$base2$base3";
+	        }
+	    }
+	}
+	
+	# Composition hash, indexed by dipeptide. Total dipeptides.
+	my %composition;
+	my $total = 0;
+	#Initializes it to zero (might not be neccessary).
+	foreach my $triB ( @triBASE ) {
+	    $composition{$triB} = 0;
+	}
+	
+	my @seq_array = split(//,$seqin);
+	# Use shift to take the first amino acid
+	my $trip = shift @seq_array;
+	$trip .= shift @seq_array;
+	# Uses a while loop to extract subseq of the incoming sequence.
+	foreach my $base(@seq_array){
+		$trip .= $base;
+		$composition{uc $trip}++;
+		$total++;
+		# Takes the first AA in base and "pops" it off.
+		$trip = substr($trip, 1);
+	}
+	
+	my $i = 1;
+	my $comp_string = "";
+	# if this protein has at least 1 dipeptide bonds, find the ratio
+	if($total){
+		foreach my $triB ( @triBASE ){
+			my $ratio = $composition{$triB} / $total;
+			$comp_string .= "$i" . ":" . "$ratio ";
+			$i++;
+		}
+		$i++;
+		$comp_string .= "\n";
+	}
+	# else, print an error message
+	else{
+		print "This protein has no tripeptide bonds!\n\n";
+	}
+	return $comp_string;
+}
+
+##################################################
+# attribute_ref
+#
+# DESCRIPTION: takes in a string with the description
+#			of the protein.  It comes in the format of
+# "1:0.25 2:0.33 3:0.01  ..."
+#
+# IN	
+#       $attr_string    : string of attributes
+#
+# OUT   
+#       $ref		  	: contains the address of
+#						the array of attributes
+##################################################
+sub attribute_ref{
+	my $attr_string = shift;
+	chomp($attr_string);
+	# split the string based on ':' and spaces
+	my @splits = split(/[: ]/, $attr_string);
+	my $i = 0;
+	my @attr;
+	while(shift(@splits)){	
+    	$attr[$i]= shift(@splits);
+    	$i++;
+	}
+	my $ref = \@attr;
+	return $ref;
+}
+
+1;

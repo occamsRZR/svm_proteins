@@ -1,0 +1,17 @@
+#!/bin/sh
+### Job name 
+#$ -N msa_phy
+### Output files
+#$ -e test.err
+#$ -o test.log
+### The variables need to be imported  
+#$ -v num,dir
+
+cd /home/perlcourse/brandon/course/Project/temp_dir/$dir/
+### run the MSA with output set to Phylip
+clustalw -INFILE=$num.fa -OUTFILE=$num.phy -OUTPUT=Phylip
+### run phylogenic analysis with 100 bootstraps, using our .phy as input
+phyml $num.phy 1 i 1 100 JTT e 4 e BIONJ n n
+
+
+exit 0
