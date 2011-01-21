@@ -1,0 +1,1 @@
+This is a simple perl program that will take in positive and negative data to train a SVM.  You can then provide a genome to mine against.  The results are then reciprocally BLASTed.  Each result is then aligned with the positive data and phylogenetic analysis is performed on each result.
