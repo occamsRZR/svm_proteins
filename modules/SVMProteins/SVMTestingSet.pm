@@ -81,8 +81,8 @@ sub test {
     my $host      = "bioservweb";
     my $port      = "3306";
     my $tablename = "results";
-    my $user      = "bfulk";
-    my $password  = "TEc4E3Ud";
+    my $user      = "#########";
+    my $password  = "##########";
 # DATA SOURCE NAME                                                                                                         
     my $dsn = "dbi:mysql:$database:$host:$port";
 
